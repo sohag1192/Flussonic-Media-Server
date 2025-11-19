@@ -2,6 +2,7 @@
 
 # === Styling ===
 bold=$(tput bold)
+underline=$(tput smul)
 info=$(tput setaf 2)
 warn=$(tput setaf 214)
 reset=$(tput sgr0)
@@ -14,22 +15,68 @@ fi
 
 # === Banner ===
 echo "${bold}${info}"
-echo "🚀 Installing Flussonic Media Server 25.11"
+echo "    ________                            _         _   __      ____         __"
+echo "   / ____/ /_  ________________  ____  (_)____   / | / /_  __/ / /__  ____/ /"
+echo "  / /_  / / / / ___/ ___/ __ \/ __ \/ / ___/  /  |/ / / / / / / / _ \/ __  / "
+echo " / __/ / / /_/ (__  |__  ) /_/ / / / / / /__   / /|  / /_/ / / /  __/ /_/ /  "
+echo "/_/   /_/\__,_/____/____/\____/_/ /_/_/\___/  /_/ |_/\__,_/_/_/\___/\__,_/   "
 echo "${reset}"
+echo "${underline}${warn}${bold}--= Flussonic 25.11 Installer =--${reset}"
+echo
 
-# === Add Repository & GPG Key ===
-wget -q -O - https://flussonic.com/public/gpg.key | apt-key add -
-echo "deb https://flussonic.com/public/apt/ stable main" > /etc/apt/sources.list.d/flussonic.list
+# === Detect Distro ===
+if [ -f /etc/debian_version ]; then
+    distro="debian"
+    package_manager="apt-get"
+elif [ -f /etc/redhat-release ]; then
+    distro="not_debian"
+    package_manager="yum"
+else
+    echo "${warn}Unsupported Linux distribution.${reset}"
+    exit 1
+fi
 
-# === Update & Install ===
-apt-get update
-apt-get install -y flussonic flussonic-transcoder
+# === Curl Check ===
+check_curl() {
+    if ! command -v curl >/dev/null 2>&1; then
+        echo "${warn}Installing curl...${reset}"
+        $package_manager install -y curl
+    fi
+}
 
-# === Optional: Add License Key ===
-echo "l4|AbOFvyPq7piW0ub_MfFUL2|r6BzpmVPpjgKpn9IunpFp6lLbCZOp3" > /etc/flussonic/license.txt
+# === Debian Install ===
+debian_install() {
+    curl -sSf http://apt.flussonic.com/binary/gpg.key > /etc/apt/trusted.gpg.d/flussonic.gpg
+    rm -f /etc/apt/sources.list.d/erlyvideo.list
+    echo "deb http://apt.flussonic.com binary/" > /etc/apt/sources.list.d/flussonic.list
+    apt-get update
+    apt-get -y --install-recommends --install-suggests install flussonic flussonic-transcoder
+}
 
-# === Basic Configuration ===
-cat > /etc/flussonic/flussonic.conf <<EOF
+# === RHEL/CentOS Install ===
+not_debian_install() {
+    cat > /etc/yum.repos.d/Flussonic.repo <<EOF
+[flussonic]
+name=Flussonic
+baseurl=http://apt.flussonic.com/rpm
+enabled=1
+gpgcheck=0
+EOF
+    $package_manager -y install flussonic-erlang flussonic flussonic-transcoder
+}
+
+# === Install Release ===
+install_release() {
+    check_curl
+    ${distro}_install
+    echo
+    echo "${info}${bold}Flussonic installed. Starting service...${reset}"
+    systemctl start flussonic || /etc/init.d/flussonic restart
+}
+
+# === Configure Flussonic ===
+configure_flussonic() {
+    cat > /etc/flussonic/flussonic.conf <<EOF
 http 80;
 rtmp 1935;
 srt 1234;
@@ -39,19 +86,32 @@ edit_auth admin admin;
 iptv;
 EOF
 
-# === Start Service ===
-systemctl restart flussonic
+    echo "l4|AbOFvyPq7piW0ub_MfFUL2|r6BzpmVPpjgKpn9IunpFp6lLbCZOp3" > /etc/flussonic/license.txt
+    systemctl restart flussonic || /etc/init.d/flussonic restart
+}
 
 # === Output Info ===
-local_ip=$(hostname -I | awk '{print $1}')
-public_ip=$(curl -s https://ifconfig.me)
-http_port=$(grep http /etc/flussonic/flussonic.conf | awk '{print $2}' | tr -d ';')
+show_info() {
+    local_ip=$(hostname -I | awk '{print $1}')
+    public_ip=$(curl -s https://ifconfig.me)
+    http_port=$(grep http /etc/flussonic/flussonic.conf | awk '{print $2}' | tr -d ';')
+    rtmp_port=$(grep rtmp /etc/flussonic/flussonic.conf | awk '{print $2}' | tr -d ';')
+    srt_port=$(grep srt /etc/flussonic/flussonic.conf | awk '{print $2}' | tr -d ';')
 
-echo
-echo "${info}${bold}✅ Flussonic 25.11 Installed Successfully!${reset}"
-echo "${warn}Local Access: http://$local_ip:$http_port${reset}"
-echo "${warn}Public Access: http://$public_ip:$http_port${reset}"
-echo "${warn}Username: admin${reset}"
-echo "${warn}Password: admin${reset}"
-echo "${warn}License Key: l4|AbOFvyPq7piW0ub_MfFUL2|r6BzpmVPpjgKpn9IunpFp6lLbCZOp3${reset}"
-echo
+    echo
+    echo "${info}${bold}✅ Flussonic Installed Successfully!${reset}"
+    echo "${warn}${bold}Local IP: $local_ip${reset}"
+    echo "${warn}${bold}Public Access: http://$public_ip:$http_port${reset}"
+    echo "${warn}${bold}HTTP Port: $http_port${reset}"
+    echo "${warn}${bold}RTMP Port: $rtmp_port${reset}"
+    echo "${warn}${bold}SRT Port: $srt_port${reset}"
+    echo "${warn}${bold}Username: admin${reset}"
+    echo "${warn}${bold}Password: admin${reset}"
+    echo "${warn}${bold}License Key: l4|AbOFvyPq7piW0ub_MfFUL2|r6BzpmVPpjgKpn9IunpFp6lLbCZOp3${reset}"
+    echo
+}
+
+# === Run All ===
+install_release
+configure_flussonic
+show_info
